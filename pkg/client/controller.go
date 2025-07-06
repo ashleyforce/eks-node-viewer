@@ -28,6 +28,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 
+	"github.com/awslabs/eks-node-viewer/pkg/metrics"
 	"github.com/awslabs/eks-node-viewer/pkg/model"
 	"github.com/awslabs/eks-node-viewer/pkg/pricing"
 )
@@ -38,15 +39,19 @@ type Controller struct {
 	pricing         pricing.Provider
 	nodeSelector    labels.Selector
 	nodeClaimClient *rest.RESTClient
+	metricsClient   *metrics.Client
+	enableMetrics   bool
 }
 
-func NewController(kubeClient *kubernetes.Clientset, nodeClaimClient *rest.RESTClient, uiModel *model.UIModel, nodeSelector labels.Selector, pricing pricing.Provider) *Controller {
+func NewController(kubeClient *kubernetes.Clientset, nodeClaimClient *rest.RESTClient, uiModel *model.UIModel, nodeSelector labels.Selector, pricing pricing.Provider, metricsClient *metrics.Client, enableMetrics bool) *Controller {
 	c := &Controller{
 		kubeClient:      kubeClient,
 		uiModel:         uiModel,
 		pricing:         pricing,
 		nodeSelector:    nodeSelector,
 		nodeClaimClient: nodeClaimClient,
+		metricsClient:   metricsClient,
+		enableMetrics:   enableMetrics,
 	}
 	pricing.OnUpdate(c.RefreshNodePrices)
 	return c
@@ -61,6 +66,28 @@ func (m Controller) Start(ctx context.Context) {
 	// If a NodeClaims Get returns an error, then don't startup the nodeclaims controller since the CRD is not registered
 	if err := m.nodeClaimClient.Get().Do(ctx).Error(); err == nil {
 		m.startNodeClaimWatch(ctx, cluster)
+	}
+
+	// Start metrics refresh if enabled
+	if m.enableMetrics && m.metricsClient != nil {
+		go m.startMetricsRefresh(ctx)
+	}
+}
+
+func (m Controller) startMetricsRefresh(ctx context.Context) {
+	ticker := time.NewTicker(30 * time.Second) // Refresh every 30 seconds
+	defer ticker.Stop()
+
+	// Initial refresh
+	m.RefreshNodeMetrics(ctx)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			m.RefreshNodeMetrics(ctx)
+		}
 	}
 }
 
@@ -209,9 +236,29 @@ func (m Controller) updatePrice(node *model.Node) {
 }
 
 func (m Controller) RefreshNodePrices() {
-	m.uiModel.Cluster().ForEachNode(func(n *model.Node) {
-		m.updatePrice(n)
+	cluster := m.uiModel.Cluster()
+	cluster.ForEachNode(func(node *model.Node) {
+		m.updatePrice(node)
 	})
+}
+
+func (m Controller) RefreshNodeMetrics(ctx context.Context) {
+	if !m.enableMetrics || m.metricsClient == nil {
+		return
+	}
+
+	nodeMetrics, err := m.metricsClient.GetNodeMetrics(ctx)
+	if err != nil {
+		// Silently ignore metrics errors to avoid disrupting the main functionality
+		return
+	}
+
+	cluster := m.uiModel.Cluster()
+	for _, metric := range nodeMetrics.Items {
+		if node, ok := cluster.GetNodeByName(metric.Name); ok {
+			node.SetRealUsed(metric.Usage)
+		}
+	}
 }
 
 // isTerminalPod returns true if the pod is deleting or in a terminal state

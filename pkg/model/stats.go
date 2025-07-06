@@ -20,6 +20,7 @@ type Stats struct {
 	NumNodes             int
 	AllocatableResources v1.ResourceList
 	UsedResources        v1.ResourceList
+	RealUsedResources    v1.ResourceList
 	PercentUsedResoruces map[v1.ResourceName]float64
 	Nodes                []*Node
 	TotalPods            int

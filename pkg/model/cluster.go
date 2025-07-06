@@ -136,6 +136,7 @@ func (c *Cluster) Stats() Stats {
 	st := Stats{
 		AllocatableResources: v1.ResourceList{},
 		UsedResources:        v1.ResourceList{},
+		RealUsedResources:    v1.ResourceList{},
 		PercentUsedResoruces: map[v1.ResourceName]float64{},
 		PodsByPhase:          map[v1.PodPhase]int{},
 	}
@@ -166,6 +167,7 @@ func (c *Cluster) Stats() Stats {
 		st.Nodes = append(st.Nodes, n)
 		addResources(st.AllocatableResources, n.Allocatable())
 		addResources(st.UsedResources, n.Used())
+		addResources(st.RealUsedResources, n.RealUsed())
 	}
 	return st
 }

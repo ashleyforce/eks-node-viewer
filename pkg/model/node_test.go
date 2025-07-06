@@ -18,6 +18,7 @@ import (
 	"time"
 
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/awslabs/eks-node-viewer/pkg/model"
@@ -186,5 +187,66 @@ func TestNodeNotReadyNoCondition(t *testing.T) {
 				t.Errorf("expected not ready time = %s, got %s", notReadyTime, node.NotReadyTime())
 			}
 		})
+	}
+}
+
+func TestNodeRealUsage(t *testing.T) {
+	n := testNode("mynode")
+	node := model.NewNode(n)
+
+	// Test initial empty real usage
+	realUsed := node.RealUsed()
+	if len(realUsed) != 0 {
+		t.Errorf("expected empty real usage initially, got %d resources", len(realUsed))
+	}
+
+	// Test setting real usage
+	testUsage := v1.ResourceList{
+		v1.ResourceCPU:    resource.MustParse("500m"),
+		v1.ResourceMemory: resource.MustParse("1Gi"),
+	}
+	node.SetRealUsed(testUsage)
+
+	// Test getting real usage
+	realUsed = node.RealUsed()
+	if got := realUsed[v1.ResourceCPU]; got.Cmp(resource.MustParse("500m")) != 0 {
+		t.Errorf("expected real CPU usage = 500m, got %s", got.String())
+	}
+	if got := realUsed[v1.ResourceMemory]; got.Cmp(resource.MustParse("1Gi")) != 0 {
+		t.Errorf("expected real memory usage = 1Gi, got %s", got.String())
+	}
+}
+
+func TestNodeComputeLabelRealUsage(t *testing.T) {
+	n := testNode("mynode")
+	n.Status.Allocatable = v1.ResourceList{
+		v1.ResourceCPU:    resource.MustParse("2"),
+		v1.ResourceMemory: resource.MustParse("4Gi"),
+	}
+	node := model.NewNode(n)
+
+	// Set real usage
+	realUsage := v1.ResourceList{
+		v1.ResourceCPU:    resource.MustParse("1"),   // 50% of 2 cores
+		v1.ResourceMemory: resource.MustParse("2Gi"), // 50% of 4Gi
+	}
+	node.SetRealUsed(realUsage)
+
+	// Test real CPU usage label
+	cpuLabel := node.ComputeLabel("eks-node-viewer/node-cpu-used")
+	if cpuLabel != "50%" {
+		t.Errorf("expected real CPU usage label = 50%%, got %s", cpuLabel)
+	}
+
+	// Test real memory usage label
+	memLabel := node.ComputeLabel("eks-node-viewer/node-memory-used")
+	if memLabel != "50%" {
+		t.Errorf("expected real memory usage label = 50%%, got %s", memLabel)
+	}
+
+	// Test non-existent real resource
+	unknownLabel := node.ComputeLabel("eks-node-viewer/node-real-unknown-usage")
+	if unknownLabel != "0%" {
+		t.Errorf("expected unknown real resource label = 0%%, got %s", unknownLabel)
 	}
 }

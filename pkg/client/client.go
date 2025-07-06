@@ -60,6 +60,10 @@ func NewNodeClaims(kubeconfig, context string) (*rest.RESTClient, error) {
 	return rest.RESTClientFor(&config)
 }
 
+func NewMetrics(kubeconfig, context string) (*rest.Config, error) {
+	return getConfig(kubeconfig, context)
+}
+
 func getConfig(kubeconfig, context string) (*rest.Config, error) {
 	// use the current context in kubeconfig
 	return clientcmd.NewNonInteractiveDeferredLoadingClientConfig(

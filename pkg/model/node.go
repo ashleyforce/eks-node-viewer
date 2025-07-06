@@ -41,15 +41,17 @@ type Node struct {
 	node                  v1.Node
 	pods                  map[objectKey]*Pod
 	used                  v1.ResourceList
+	realUsed              v1.ResourceList
 	Price                 float64
 	nodeclaimCreationTime time.Time
 }
 
 func NewNode(n *v1.Node) *Node {
 	node := &Node{
-		node: *n,
-		pods: map[objectKey]*Pod{},
-		used: v1.ResourceList{},
+		node:     *n,
+		pods:     map[objectKey]*Pod{},
+		used:     v1.ResourceList{},
+		realUsed: v1.ResourceList{},
 	}
 
 	return node
@@ -184,6 +186,22 @@ func (n *Node) Used() v1.ResourceList {
 	return used
 }
 
+func (n *Node) RealUsed() v1.ResourceList {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+	realUsed := v1.ResourceList{}
+	for rn, q := range n.realUsed {
+		realUsed[rn] = q.DeepCopy()
+	}
+	return realUsed
+}
+
+func (n *Node) SetRealUsed(usage v1.ResourceList) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.realUsed = usage
+}
+
 func (n *Node) Cordoned() bool {
 	n.mu.RLock()
 	defer n.mu.RUnlock()
@@ -296,6 +314,10 @@ func (n *Node) ComputeLabel(labelName string) string {
 	switch labelName {
 	case "eks-node-viewer/node-age":
 		return duration.HumanDuration(time.Since(n.Created()))
+	case "eks-node-viewer/node-memory-used":
+		return pctUsage(n.Allocatable(), n.RealUsed(), "memory")
+	case "eks-node-viewer/node-cpu-used":
+		return pctUsage(n.Allocatable(), n.RealUsed(), "cpu")
 	}
 	// resource based custom labels
 	if match := resourceLabelRe.FindStringSubmatch(labelName); len(match) > 0 {

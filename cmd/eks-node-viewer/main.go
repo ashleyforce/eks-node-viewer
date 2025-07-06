@@ -29,6 +29,7 @@ import (
 
 	"github.com/awslabs/eks-node-viewer/pkg/aws"
 	"github.com/awslabs/eks-node-viewer/pkg/client"
+	"github.com/awslabs/eks-node-viewer/pkg/metrics"
 	"github.com/awslabs/eks-node-viewer/pkg/model"
 )
 
@@ -66,6 +67,22 @@ func main() {
 	if err != nil {
 		log.Fatalf("creating node claim client, %s", err)
 	}
+
+	// Create metrics client if real metrics are enabled
+	var metricsClient *metrics.Client
+	enableMetrics := flags.MemoryUsed || flags.CpuUsed
+	if enableMetrics {
+		metricsConfig, err := client.NewMetrics(flags.Kubeconfig, flags.Context)
+		if err != nil {
+			log.Fatalf("creating metrics config, %s", err)
+		}
+		metricsClient, err = metrics.NewClient(metricsConfig)
+		if err != nil {
+			log.Printf("Warning: failed to create metrics client, real usage metrics will be disabled: %s", err)
+			enableMetrics = false
+		}
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 
 	pprov := aws.NewStaticPricingProvider()
@@ -75,6 +92,7 @@ func main() {
 	}
 	m := model.NewUIModel(strings.Split(flags.ExtraLabels, ","), flags.NodeSort, style)
 	m.DisablePricing = flags.DisablePricing
+	m.EnableRealUsage = enableMetrics
 	m.SetResources(strings.FieldsFunc(flags.Resources, func(r rune) bool { return r == ',' }))
 
 	var nodeSelector labels.Selector
@@ -92,7 +110,7 @@ func main() {
 		}
 		pprov = aws.NewPricingProvider(ctx, cfg)
 	}
-	controller := client.NewController(cs, nodeClaimClient, m, nodeSelector, pprov)
+	controller := client.NewController(cs, nodeClaimClient, m, nodeSelector, pprov, metricsClient, enableMetrics)
 
 	controller.Start(ctx)
 

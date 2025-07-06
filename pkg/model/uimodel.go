@@ -44,14 +44,15 @@ var (
 )
 
 type UIModel struct {
-	progress       progress.Model
-	cluster        *Cluster
-	extraLabels    []string
-	paginator      paginator.Model
-	height         int
-	nodeSorter     func(lhs, rhs *Node) bool
-	style          *Style
-	DisablePricing bool
+	progress        progress.Model
+	cluster         *Cluster
+	extraLabels     []string
+	paginator       paginator.Model
+	height          int
+	nodeSorter      func(lhs, rhs *Node) bool
+	style           *Style
+	DisablePricing  bool
+	EnableRealUsage bool
 }
 
 func NewUIModel(extraLabels []string, nodeSort string, style *Style) *UIModel {
@@ -128,6 +129,7 @@ func (u *UIModel) View() string {
 func (u *UIModel) writeNodeInfo(n *Node, w io.Writer, resources []v1.ResourceName) {
 	allocatable := n.Allocatable()
 	used := n.Used()
+	realUsed := n.RealUsed()
 	firstLine := true
 	resNameLen := 0
 	for _, res := range resources {
@@ -135,6 +137,8 @@ func (u *UIModel) writeNodeInfo(n *Node, w io.Writer, resources []v1.ResourceNam
 			resNameLen = len(res)
 		}
 	}
+
+	// First, display requested resource usage rows
 	for _, res := range resources {
 		usedRes := used[res]
 		allocatableRes := allocatable[res]
@@ -201,6 +205,29 @@ func (u *UIModel) writeNodeInfo(n *Node, w io.Writer, resources []v1.ResourceNam
 		fmt.Fprintln(w)
 		firstLine = false
 	}
+
+	// Then, display real resource usage rows if enabled and metrics are available
+	if u.EnableRealUsage {
+		for _, res := range resources {
+			realUsedRes := realUsed[res]
+			allocatableRes := allocatable[res]
+
+			// Only show real usage if we have data for this resource
+			if !realUsedRes.IsZero() {
+				realPct := realUsedRes.AsApproximateFloat64() / allocatableRes.AsApproximateFloat64()
+				if allocatableRes.AsApproximateFloat64() == 0 {
+					realPct = 0
+				}
+
+				displayLabel := res + "-used"
+				fmt.Fprintf(w, " \t%s\t%s\t\t\t\t\t", displayLabel, u.progress.ViewAs(realPct))
+				for range u.extraLabels {
+					fmt.Fprintf(w, "\t")
+				}
+				fmt.Fprintln(w)
+			}
+		}
+	}
 }
 
 func (u *UIModel) writeClusterSummary(resources []v1.ResourceName, stats Stats, w io.Writer) {
@@ -209,10 +236,18 @@ func (u *UIModel) writeClusterSummary(resources []v1.ResourceName, stats Stats, 
 	for _, res := range resources {
 		allocatable := stats.AllocatableResources[res]
 		used := stats.UsedResources[res]
+		realUsed := stats.RealUsedResources[res]
+
 		pctUsed := 0.0
 		if allocatable.AsApproximateFloat64() != 0 {
 			pctUsed = 100 * (used.AsApproximateFloat64() / allocatable.AsApproximateFloat64())
 		}
+
+		pctRealUsed := 0.0
+		if u.EnableRealUsage && allocatable.AsApproximateFloat64() != 0 && !realUsed.IsZero() {
+			pctRealUsed = 100 * (realUsed.AsApproximateFloat64() / allocatable.AsApproximateFloat64())
+		}
+
 		pctUsedStr := fmt.Sprintf("%0.1f%%", pctUsed)
 		if pctUsed > 90 {
 			pctUsedStr = u.style.green(pctUsedStr)
@@ -230,12 +265,41 @@ func (u *UIModel) writeClusterSummary(resources []v1.ResourceName, stats Stats, 
 		if u.DisablePricing {
 			clusterPrice = ""
 		}
+
 		if firstLine {
-			enPrinter.Fprintf(w, "%d nodes\t(%10s/%s)\t%s\t%s\t%s\t%s\n",
-				stats.NumNodes, used.String(), allocatable.String(), pctUsedStr, res, u.progress.ViewAs(pctUsed/100.0), clusterPrice)
+			if u.EnableRealUsage && !realUsed.IsZero() {
+				pctRealUsedStr := fmt.Sprintf("%0.1f%%", pctRealUsed)
+				if pctRealUsed > 90 {
+					pctRealUsedStr = u.style.green(pctRealUsedStr)
+				} else if pctRealUsed > 60 {
+					pctRealUsedStr = u.style.yellow(pctRealUsedStr)
+				} else {
+					pctRealUsedStr = u.style.red(pctRealUsedStr)
+				}
+				enPrinter.Fprintf(w, "%d nodes\t(%10s/%s)\t%s\t%s\t%s\t[Real: %s/%s %s %s]\t%s\n",
+					stats.NumNodes, used.String(), allocatable.String(), pctUsedStr, res, u.progress.ViewAs(pctUsed/100.0),
+					realUsed.String(), allocatable.String(), pctRealUsedStr, u.progress.ViewAs(pctRealUsed/100.0), clusterPrice)
+			} else {
+				enPrinter.Fprintf(w, "%d nodes\t(%10s/%s)\t%s\t%s\t%s\t%s\n",
+					stats.NumNodes, used.String(), allocatable.String(), pctUsedStr, res, u.progress.ViewAs(pctUsed/100.0), clusterPrice)
+			}
 		} else {
-			enPrinter.Fprintf(w, " \t%s/%s\t%s\t%s\t%s\t\n",
-				used.String(), allocatable.String(), pctUsedStr, res, u.progress.ViewAs(pctUsed/100.0))
+			if u.EnableRealUsage && !realUsed.IsZero() {
+				pctRealUsedStr := fmt.Sprintf("%0.1f%%", pctRealUsed)
+				if pctRealUsed > 90 {
+					pctRealUsedStr = u.style.green(pctRealUsedStr)
+				} else if pctRealUsed > 60 {
+					pctRealUsedStr = u.style.yellow(pctRealUsedStr)
+				} else {
+					pctRealUsedStr = u.style.red(pctRealUsedStr)
+				}
+				enPrinter.Fprintf(w, " \t%s/%s\t%s\t%s\t%s\t[Real: %s/%s %s %s]\t\n",
+					used.String(), allocatable.String(), pctUsedStr, res, u.progress.ViewAs(pctUsed/100.0),
+					realUsed.String(), allocatable.String(), pctRealUsedStr, u.progress.ViewAs(pctRealUsed/100.0))
+			} else {
+				enPrinter.Fprintf(w, " \t%s/%s\t%s\t%s\t%s\t\n",
+					used.String(), allocatable.String(), pctUsedStr, res, u.progress.ViewAs(pctUsed/100.0))
+			}
 		}
 		firstLine = false
 	}

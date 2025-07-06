@@ -51,6 +51,8 @@ type Flags struct {
 	DisablePricing  bool
 	ShowAttribution bool
 	Version         bool
+	MemoryUsed      bool
+	CpuUsed         bool
 }
 
 func ParseFlags() (Flags, error) {
@@ -89,6 +91,12 @@ func ParseFlags() (Flags, error) {
 
 	disablePricingDefault := cfg.getBoolValue("disable-pricing", false)
 	flagSet.BoolVar(&flags.DisablePricing, "disable-pricing", disablePricingDefault, "Disable pricing lookups")
+
+	memoryUsedDefault := cfg.getBoolValue("memory-used", false)
+	flagSet.BoolVar(&flags.MemoryUsed, "memory-used", memoryUsedDefault, "Show memory usage from metrics API")
+
+	cpuUsedDefault := cfg.getBoolValue("cpu-used", false)
+	flagSet.BoolVar(&flags.CpuUsed, "cpu-used", cpuUsedDefault, "Show CPU usage from metrics API")
 
 	flagSet.BoolVar(&flags.ShowAttribution, "attribution", false, "Show the Open Source Attribution")
 

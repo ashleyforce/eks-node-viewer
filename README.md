@@ -47,6 +47,10 @@ Usage of ./eks-node-viewer:
     	Node label selector used to filter nodes, if empty all nodes are selected
   -node-sort string
     	Sort order for the nodes, either 'creation' or a label name. The sort order can be controlled by appending =asc or =dsc to the value. (default "creation")
+  -cpu-used
+    	Show real CPU usage from metrics API
+  -memory-used
+    	Show real memory usage from metrics API
   -resources string
     	List of comma separated resources to monitor (default "cpu")
   -style string
@@ -68,6 +72,12 @@ eks-node-viewer --resources cpu,memory
 eks-node-viewer --extra-labels topology.kubernetes.io/zone
 # Sort by CPU usage in descending order
 eks-node-viewer --node-sort=eks-node-viewer/node-cpu-usage=dsc
+# Show CPU usage from metrics API
+eks-node-viewer --cpu-used
+# Show real memory usage from metrics API  
+eks-node-viewer --memory-used
+# Show both CPU and memory usage
+eks-node-viewer --cpu-used --memory-used --resources cpu,memory
 # Specify a particular AWS profile and region
 AWS_PROFILE=myprofile AWS_REGION=us-west-2
 ```
@@ -81,6 +91,24 @@ AWS_PROFILE=myprofile AWS_REGION=us-west-2
 - `eks-node-viewer/node-memory-usage` - Memory usage (requests)
 - `eks-node-viewer/node-pods-usage` - Pod usage (requests)
 - `eks-node-viewer/node-ephemeral-storage-usage` - Ephemeral Storage usage (requests)
+- `eks-node-viewer/node-cpu-used` - CPU usage from metrics API (when --cpu-used is enabled)
+- `eks-node-viewer/node-memory-used` - Memory usage from metrics API (when --memory-used is enabled)
+
+### Real Resource Usage
+
+When the `--cpu-used` or `--memory-used` options are enabled, `eks-node-viewer` will fetch actual resource usage from the Kubernetes metrics API. This requires that the metrics-server is installed and running in your cluster.
+
+The real usage metrics are displayed as additional rows for each node (labeled as `cpu-used` and `memory-used`) alongside the traditional request-based usage rows. Real usage represents the actual resources being consumed by workloads, while request usage represents the resources that have been requested/reserved by pods.
+
+For example, a node display might look like:
+```
+node1     cpu    ████████░░ 80%    (5 pods)    m5.large    On-Demand    Ready
+          cpu-used ██████████ 95%
+          memory ████░░░░░░ 40%
+          memory-used ██████░░░░ 60%
+```
+
+This shows that while the node has 80% CPU requests and 40% memory requests, the actual usage is 95% CPU and 60% memory.
 
 ### Default Options
 You can supply default options to `eks-node-viewer` by creating a file named `.eks-node-viewer` in your home directory and specifying
